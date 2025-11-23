@@ -1,0 +1,10 @@
+.ipynb_checkpoints/
+ep14/
+include
+Lib
+Scripts
+tcl
+LICENSE.txt
+*.avi
+*.png
+*.gif
