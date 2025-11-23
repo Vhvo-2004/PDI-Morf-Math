@@ -1,10 +1,12 @@
-"""Gera imagens sintéticas e demonstra operações de morfologia matemática.
+"""Demonstra morfologia matemática com base no notebook 13_morphological_operators.
 
 Pipeline:
-- Cria três imagens (pessoa, objeto e documento) nas dimensões fornecidas.
+- Carrega fotografias reais (pessoa, objeto e documento) de um diretório indicado ou gera
+  equivalentes sintéticos quando ausentes, mantendo especificações RGB de 24 bits.
 - Coleta metadados técnicos: resolução, paleta e gamut aproximado.
-- Decompõe em canais RGB e gera histogramas de 256 níveis.
-- Aplica abertura, fechamento e gradiente morfológico com elemento estruturante configurável.
+- Decompõe em canais RGB, gera histogramas de 256 níveis.
+- Aplica erosão, dilatação, abertura, fechamento e gradiente morfológico com elemento
+  estruturante configurável, seguindo as operações do notebook base.
 - Exporta PNGs intermediários e monta um relatório em PDF.
 """
 
@@ -21,7 +23,9 @@ from matplotlib import pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "output"
+INPUT_DIR = Path(__file__).resolve().parent / "input"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass
@@ -123,7 +127,7 @@ def save_image(name: str, image: np.ndarray) -> Path:
     return path
 
 
-def image_metadata(name: str, image: np.ndarray) -> Dict[str, str]:
+def image_metadata(name: str, image: np.ndarray, source: str) -> Dict[str, str]:
     height, width, channels = image.shape
     return {
         "nome": name,
@@ -132,7 +136,25 @@ def image_metadata(name: str, image: np.ndarray) -> Dict[str, str]:
         "profundidade_bits": f"{8 * channels} bits (total)",
         "paleta": "RGB 24 bits",
         "gamut": "sRGB aproximado (inteiros 0-255)",
+        "fonte": source,
     }
+
+
+def load_or_generate(name: str, generator, width: int, height: int, input_dir: Path) -> Tuple[np.ndarray, str]:
+    """Tenta carregar uma foto real do diretório informado; gera sintética se não encontrar."""
+
+    extensions = (".png", ".jpg", ".jpeg", ".bmp")
+    for ext in extensions:
+        candidate = input_dir / f"{name}{ext}"
+        if candidate.exists():
+            image = cv2.imread(str(candidate))
+            if image is None:
+                break
+            if image.ndim == 2:
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+            return image, f"foto real ({candidate.name})"
+
+    return generator(width, height), "sintética (gerada pelo script)"
 
 
 def decompose_rgb(name: str, image: np.ndarray) -> Tuple[Dict[str, Path], Dict[str, Tuple[np.ndarray, np.ndarray]]]:
@@ -187,21 +209,25 @@ def build_structuring_element(element: str, size: int) -> np.ndarray:
 def morphological_process(name: str, image: np.ndarray, kernel: np.ndarray) -> Dict[str, Path]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     operations = {
-        "abertura": cv2.MORPH_OPEN,
-        "fechamento": cv2.MORPH_CLOSE,
-        "gradiente": cv2.MORPH_GRADIENT,
+        "erosao": lambda img: cv2.erode(img, kernel, iterations=1),
+        "dilatacao": lambda img: cv2.dilate(img, kernel, iterations=1),
+        "abertura": lambda img: cv2.morphologyEx(img, cv2.MORPH_OPEN, kernel),
+        "fechamento": lambda img: cv2.morphologyEx(img, cv2.MORPH_CLOSE, kernel),
+        "gradiente": lambda img: cv2.morphologyEx(img, cv2.MORPH_GRADIENT, kernel),
     }
     paths: Dict[str, Path] = {}
-    results: List[np.ndarray] = []
+    results: Dict[str, np.ndarray] = {}
 
-    for op_name, op_code in operations.items():
-        processed = cv2.morphologyEx(gray, op_code, kernel)
+    for op_name, fn in operations.items():
+        processed = fn(gray)
         path = save_image(f"{name}_{op_name}.png", processed)
         paths[op_name] = path
-        results.append(processed)
+        results[op_name] = processed
 
-    stacked = cv2.merge(results)
-    paths["combinado"] = save_image(f"{name}_morfologia.png", stacked)
+    combined = cv2.merge(
+        [results.get("erosao"), results.get("dilatacao"), results.get("gradiente")]
+    )
+    paths["combinado"] = save_image(f"{name}_morfologia.png", combined)
     return paths
 
 
@@ -235,7 +261,7 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
         add_text_page(
             pdf,
             "Capa",
-            "Titulo: Estudo de Morfologia Matematica\n"
+            "Titulo: Estudo de Morfologia Matematica (base: 13_morphological_operators.ipynb)\n"
             "Aluno: (preencher)\n"
             "Curso/Disciplina: PDI\n"
             "Professor: (preencher)\n"
@@ -246,11 +272,12 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
         add_text_page(
             pdf,
             "Resumo",
-            "Objetivo: explorar abertura, fechamento e gradiente em imagens sintéticas coloridas.\n"
-            "Metodologia: geração de imagens (pessoa, objeto, documento), canais RGB, histogramas,"
-            " conversão para escala de cinza e aplicação das operações com elemento estruturante"
-            f" {element} de tamanho {kernel_size}.\n"
-            "Resultados: redução de ruído em fundos, preenchimento de lacunas e realce de bordas",
+            "Objetivo: reproduzir as operações do notebook 13_morphological_operators em fotos reais"
+            " (ou versões sintéticas), com erosão, dilatação, abertura, fechamento e gradiente.\n"
+            "Metodologia: leitura ou síntese das imagens (pessoa, objeto, documento), canais RGB,"
+            " histogramas, conversão para escala de cinza e aplicação das operações com elemento"
+            f" estruturante {element} de tamanho {kernel_size}.\n"
+            "Resultados: separação de objetos, preenchimento de falhas e realce de bordas.",
         )
 
         add_text_page(
@@ -264,30 +291,33 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
             pdf,
             "1. Introducao",
             "Morfologia matematica manipula formas via elementos estruturantes. Operacoes basicas"
-            " (abertura, fechamento, gradiente) permitem limpar ruido, preencher falhas e realcar"
-            " bordas em imagens coloridas convertidas para escala de cinza.",
+            " (erosao, dilatacao, abertura, fechamento, gradiente) permitem limpar ruido, separar"
+            " objetos conectados e realcar bordas em imagens coloridas convertidas para escala de"
+            " cinza, conforme explorado no notebook 13_morphological_operators.",
         )
 
         add_text_page(
             pdf,
             "2. Referencial Teorico",
-            "Abertura = erosao + dilatacao; Fechamento = dilatacao + erosao; Gradiente ="
-            " dilatacao - erosao. A forma e o tamanho do elemento estruturante controlam o nivel"
-            " de suavizacao e preservacao de contornos.",
+            "Erosao e dilatacao sao operacoes fundamentais. Abertura = erosao + dilatacao;"
+            " Fechamento = dilatacao + erosao; Gradiente = dilatacao - erosao. A forma e o tamanho"
+            " do elemento estruturante controlam o nivel de suavizacao e preservacao de contornos.",
         )
 
         metodologia = [
             "3. Metodologia",
-            "Imagens sinteticas em RGB 24 bits, gamut sRGB aproximado.",
-            f"Elemento estruturante: {element}, tamanho {kernel_size}.",
-            "Procedimentos: gerar imagens, decompor canais, histogramas 256 bins,"
-            " aplicar operacoes morfologicas em escala de cinza e salvar evidencias.",
+            "Fonte das imagens: fotos reais em assignment/input/ (pessoa.jpg/png, objeto.jpg/png, documento.jpg/png) ou",
+            " versoes sinteticas quando ausentes, garantindo RGB 24 bits e gamut sRGB aproximado.",
+            f"Elemento estruturante: {element}, tamanho {kernel_size} (cv2.getStructuringElement).",
+            "Procedimentos: carregar/gerar imagens, decompor canais, histogramas 256 bins,",
+            " aplicar erosao, dilatacao, abertura, fechamento e gradiente em escala de cinza;",
+            " salvar evidencias e montar PDF.",
             "Metadados:",
         ]
         for art in artifacts:
             metodologia.append(
                 f"- {art.metadata['nome']}: {art.metadata['dimensoes']} px, paleta {art.metadata['paleta']}, "
-                f"gamut {art.metadata['gamut']}"
+                f"gamut {art.metadata['gamut']}, origem {art.metadata['fonte']}"
             )
         add_text_page(pdf, "\n".join(metodologia[:1]), "\n".join(metodologia[1:]))
 
@@ -295,7 +325,8 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
             pdf,
             "4. Resultados e Discussao",
             "Histogramas mostram distribuicoes distintas (tons de pele, fundos claros e cores"
-            " frias). Abertura remove ruido do documento; fechamento consolida regioes no avatar;"
+            " frias). Erosao e dilatacao seguem o notebook base para separar ou preencher formas;"
+            " abertura remove ruido do documento; fechamento consolida regioes no avatar;"
             " gradiente destaca contornos no objeto e no texto. Variar o kernel altera a relacao"
             " entre suavizacao e preservacao de detalhes.",
         )
@@ -305,7 +336,8 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
             "5. Conclusao",
             "Operacoes morfologicas simples, parametrizadas por forma e tamanho do kernel,"
             " sao eficazes para limpar e realcar estruturas. Trabalhos futuros: top-hat/black-hat,"
-            " processar canais individualmente e integrar OCR.",
+            " processar canais individualmente, seguir demais exemplos do 13_morphological_operators",
+            " (reconstrucao, gradientes internos/externos) e integrar OCR.",
         )
 
         add_text_page(
@@ -335,6 +367,8 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
                 pdf,
                 f"Morfologia - {art.name}",
                 [
+                    ("Erosao", art.morphology_paths["erosao"]),
+                    ("Dilatacao", art.morphology_paths["dilatacao"]),
                     ("Abertura", art.morphology_paths["abertura"]),
                     ("Fechamento", art.morphology_paths["fechamento"]),
                     ("Gradiente", art.morphology_paths["gradiente"]),
@@ -357,6 +391,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--img-height", type=int, default=600, help="Altura das imagens sinteticas (px)")
     parser.add_argument("--kernel-size", type=int, default=5, help="Tamanho do elemento estruturante (impar)")
     parser.add_argument("--element", type=str, default="rect", choices=["rect", "ellipse", "cross"], help="Forma do elemento estruturante")
+    parser.add_argument(
+        "--input-dir",
+        type=Path,
+        default=INPUT_DIR,
+        help="Diretorio com fotos reais (pessoa.*, objeto.*, documento.*); se vazio, gera imagens sinteticas",
+    )
     return parser.parse_args()
 
 
@@ -373,9 +413,9 @@ def main() -> None:
 
     artifacts: List[ImageArtifact] = []
     for name, generator in generators.items():
-        image = generator(args.img_width, args.img_height)
+        image, source = load_or_generate(name, generator, args.img_width, args.img_height, args.input_dir)
         original_path = save_image(f"{name}.png", image)
-        meta = image_metadata(name, image)
+        meta = image_metadata(name, image, source)
 
         channel_paths, histograms = decompose_rgb(name, image)
         histogram_path = plot_histograms(name, histograms)
@@ -397,6 +437,7 @@ def main() -> None:
     print(f"Relatorio gerado em: {report_path}")
     print("Imagens e histogramas: assignment/output/")
     print(f"Kernel: {args.element} de tamanho {kernel_size}")
+    print(f"Fonte das imagens: {args.input_dir} (usa sinteticas se vazio)")
 
 
 if __name__ == "__main__":
