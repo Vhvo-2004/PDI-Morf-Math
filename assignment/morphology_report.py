@@ -231,11 +231,16 @@ def morphological_process(name: str, image: np.ndarray, kernel: np.ndarray) -> D
     return paths
 
 
-def add_text_page(pdf: PdfPages, title: str, body: str) -> None:
+# ✔ NOVA VERSÃO FLEXÍVEL
+def add_text_page(pdf: PdfPages, title: str, *body: str) -> None:
     fig = plt.figure(figsize=(8.27, 11.69))
     plt.axis("off")
+
     plt.text(0.5, 0.92, title, ha="center", va="center", fontsize=18, fontweight="bold")
-    plt.text(0.05, 0.85, body, ha="left", va="top", fontsize=11)
+
+    full_text = "\n".join(body)  # Junta múltiplos parágrafos automaticamente
+    plt.text(0.05, 0.85, full_text, ha="left", va="top", fontsize=11)
+
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -319,7 +324,7 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
                 f"- {art.metadata['nome']}: {art.metadata['dimensoes']} px, paleta {art.metadata['paleta']}, "
                 f"gamut {art.metadata['gamut']}, origem {art.metadata['fonte']}"
             )
-        add_text_page(pdf, "\n".join(metodologia[:1]), "\n".join(metodologia[1:]))
+        add_text_page(pdf, metodologia[0], *metodologia[1:])
 
         add_text_page(
             pdf,
@@ -334,10 +339,11 @@ def create_report(artifacts: List[ImageArtifact], kernel_size: int, element: str
         add_text_page(
             pdf,
             "5. Conclusao",
-            "Operacoes morfologicas simples, parametrizadas por forma e tamanho do kernel,"
-            " sao eficazes para limpar e realcar estruturas. Trabalhos futuros: top-hat/black-hat,"
-            " processar canais individualmente, seguir demais exemplos do 13_morphological_operators",
-            " (reconstrucao, gradientes internos/externos) e integrar OCR.",
+            "Operacoes morfologicas simples, parametrizadas por forma e tamanho do kernel,",
+            "sao eficazes para limpar e realcar estruturas.",
+            "Trabalhos futuros: top-hat/black-hat, processar canais individualmente, seguir demais",
+            "exemplos do 13_morphological_operators (reconstrucao, gradientes internos/externos)",
+            "e integrar OCR.",
         )
 
         add_text_page(
